@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	iampb "cloud.google.com/go/iam/apiv1/iampb"
 	run "cloud.google.com/go/run/apiv2"
 	"cloud.google.com/go/run/apiv2/runpb"
 
@@ -198,6 +199,15 @@ func deployServices(ctx context.Context, cfg config) error {
 			"event":   "service_deployed",
 			"service": entry.name,
 		})
+		// Allow unauthenticated access (safe: services are internal-only)
+		fullName := fmt.Sprintf("%s/services/%s", parent, entry.name)
+		if err := setAllUsersInvoker(ctx, client, fullName); err != nil {
+			logJSON("ERROR", map[string]string{
+				"event":   "set_iam_failed",
+				"service": entry.name,
+				"error":   err.Error(),
+			})
+		}
 		succeeded++
 	}
 
@@ -240,8 +250,8 @@ func buildServiceSpec(cfg config, name string) *runpb.Service {
 					},
 					Resources: &runpb.ResourceRequirements{
 						Limits: map[string]string{
-							"cpu":    "0.08",
-							"memory": "128Mi",
+							"cpu":    "1",
+							"memory": "512Mi",
 						},
 					},
 					Env: []*runpb.EnvVar{
@@ -252,6 +262,24 @@ func buildServiceSpec(cfg config, name string) *runpb.Service {
 			},
 		},
 	}
+}
+
+func setAllUsersInvoker(ctx context.Context, client *run.ServicesClient, resource string) error {
+	_, err := client.SetIamPolicy(ctx, &iampb.SetIamPolicyRequest{
+		Resource: resource,
+		Policy: &iampb.Policy{
+			Bindings: []*iampb.Binding{
+				{
+					Role:    "roles/run.invoker",
+					Members: []string{"allUsers"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("setting IAM policy: %w", err)
+	}
+	return nil
 }
 
 func deleteServices(ctx context.Context, cfg config) error {
@@ -366,6 +394,13 @@ func runChecker(ctx context.Context, cfg config) error {
 	if err := ensureCheckerJob(ctx, client, cfg, parent, jobName); err != nil {
 		return fmt.Errorf("ensuring checker job: %w", err)
 	}
+
+	// Wait for job to finish deploying before running
+	logJSON("INFO", map[string]string{
+		"event":   "waiting_for_job_ready",
+		"message": "sleeping 5s for job deployment",
+	})
+	time.Sleep(5 * time.Second)
 
 	// Run the job
 	logJSON("INFO", map[string]string{
