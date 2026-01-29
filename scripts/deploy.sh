@@ -155,31 +155,29 @@ build_images() {
 }
 
 # ── Step 4: Deploy N services in batches ──────────────────────────────────────
-deploy_services() {
-  info "Deploying ${COUNT} services (batch size: ${BATCH_SIZE})"
 
-  local succeeded=0
-  local failed=0
-  local total="$COUNT"
+# Deploy a list of service names in batches, returning failed names in FAILED_NAMES.
+FAILED_NAMES=()
+deploy_batch_list() {
+  local service_names=("$@")
+  local total=${#service_names[@]}
   local i=0
+  FAILED_NAMES=()
 
   while (( i < total )); do
-    # Determine batch bounds
     local batch_end=$(( i + BATCH_SIZE ))
     if (( batch_end > total )); then
       batch_end=$total
     fi
 
-    info "Batch: deploying services ${i}..$(( batch_end - 1 ))"
+    info "Batch: deploying ${service_names[*]:$i:$(( batch_end - i ))}"
 
-    # Launch batch in background
     local pids=()
-    local names=()
+    local batch_names=()
     local j=$i
     while (( j < batch_end )); do
-      local name
-      name=$(service_name "$j")
-      names+=("$name")
+      local name="${service_names[$j]}"
+      batch_names+=("$name")
 
       gcloud run deploy "$name" \
         --image "$SERVICE_IMAGE" \
@@ -191,11 +189,10 @@ deploy_services() {
         --subnet "$SUBNET" \
         --min-instances 0 \
         --max-instances 1 \
-        --cpu 1 \
-        --memory 512Mi \
+        --cpu 0.08 \
+        --memory 128Mi \
         --set-env-vars "TARGET_URL=${TARGET_URL},SERVICE_NAME=${name}" \
         --allow-unauthenticated \
-        --no-cpu-throttling \
         --quiet &
 
       pids+=($!)
@@ -203,25 +200,49 @@ deploy_services() {
       sleep 1
     done
 
-    # Wait for batch
     local k=0
     for pid in "${pids[@]}"; do
       if wait "$pid"; then
-        ok "Deployed: ${names[$k]}"
-        (( succeeded++ ))
+        ok "Deployed: ${batch_names[$k]}"
       else
-        err "Failed: ${names[$k]}"
-        (( failed++ ))
+        err "Failed: ${batch_names[$k]}"
+        FAILED_NAMES+=("${batch_names[$k]}")
       fi
       (( k++ ))
     done
 
     i=$batch_end
   done
+}
 
-  info "Deploy summary: ${succeeded} succeeded, ${failed} failed (${total} total)"
-  if (( failed > 0 )); then
-    err "${failed} service(s) failed to deploy"
+deploy_services() {
+  info "Deploying ${COUNT} services (batch size: ${BATCH_SIZE})"
+
+  # Build initial list of service names
+  local all_names=()
+  local i=0
+  while (( i < COUNT )); do
+    all_names+=("$(service_name "$i")")
+    (( i++ ))
+  done
+
+  deploy_batch_list "${all_names[@]}"
+
+  local max_retries=3
+  local retry=0
+  while (( ${#FAILED_NAMES[@]} > 0 && retry < max_retries )); do
+    (( retry++ ))
+    local retry_list=("${FAILED_NAMES[@]}")
+    warn "Retrying ${#retry_list[@]} failed service(s) (attempt ${retry}/${max_retries}) after 30s..."
+    sleep 30
+    deploy_batch_list "${retry_list[@]}"
+  done
+
+  local total_failed=${#FAILED_NAMES[@]}
+  local total_ok=$(( COUNT - total_failed ))
+  info "Deploy summary: ${total_ok} succeeded, ${total_failed} failed (${COUNT} total)"
+  if (( total_failed > 0 )); then
+    err "${total_failed} service(s) failed to deploy after ${max_retries} retries"
     return 1
   fi
 }
