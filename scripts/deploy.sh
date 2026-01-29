@@ -92,7 +92,7 @@ ensure_target_vm() {
     --zone="$ZONE" \
     --tunnel-through-iap \
     --quiet \
-    --command='pkill -f ./target || true; nohup ./target > target.log 2>&1 & sleep 1 && echo "target started"'
+    --command='pkill -x target 2>/dev/null || true; sleep 1; setsid ./target > target.log 2>&1 < /dev/null & sleep 1; echo "target started"'
   ok "Target service started"
 
   local ip
