@@ -218,14 +218,51 @@ deploy_batch_list() {
 deploy_services() {
   info "Deploying ${COUNT} services (batch size: ${BATCH_SIZE})"
 
-  # Build initial list of service names
+  # Discover which services already exist
+  info "Checking for existing services..."
+  local existing=()
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && existing+=("$name")
+  done < <(
+    gcloud run services list \
+      --region "$REGION" \
+      --filter "metadata.name~^${PREFIX}-[0-9]+" \
+      --format 'value(metadata.name)' \
+      2>/dev/null
+  )
+
+  # Build list of services that need deploying
   local all_names=()
+  local skipped=0
   local i=0
   while (( i < COUNT )); do
-    all_names+=("$(service_name "$i")")
+    local name
+    name=$(service_name "$i")
+    local found=false
+    for e in "${existing[@]+"${existing[@]}"}"; do
+      if [[ "$e" == "$name" ]]; then
+        found=true
+        break
+      fi
+    done
+    if [[ "$found" == "true" ]]; then
+      (( skipped++ ))
+    else
+      all_names+=("$name")
+    fi
     (( i++ ))
   done
 
+  if (( skipped > 0 )); then
+    ok "Skipping ${skipped} already-deployed service(s)"
+  fi
+
+  if (( ${#all_names[@]} == 0 )); then
+    ok "All ${COUNT} services already deployed"
+    return
+  fi
+
+  info "Deploying ${#all_names[@]} new service(s)"
   deploy_batch_list "${all_names[@]}"
 
   local max_retries=3
@@ -247,7 +284,50 @@ deploy_services() {
   fi
 }
 
-# ── Step 5: Create / update checker Cloud Run Job ─────────────────────────────
+# ── Step 5: Fix IAM bindings ──────────────────────────────────────────────────
+fix_iam_bindings() {
+  info "Checking IAM bindings on ${COUNT} service(s)..."
+
+  local to_fix=()
+  local i=0
+  while (( i < COUNT )); do
+    local name
+    name=$(service_name "$i")
+    local policy
+    policy=$(gcloud run services get-iam-policy "$name" \
+      --region "$REGION" --format='value(bindings.members)' 2>/dev/null || true)
+    if [[ "$policy" != *"allUsers"* ]]; then
+      to_fix+=("$name")
+    fi
+    (( i++ ))
+  done
+
+  if (( ${#to_fix[@]} == 0 )); then
+    ok "All services have correct IAM bindings"
+    return
+  fi
+
+  warn "Fixing IAM bindings for ${#to_fix[@]} service(s)"
+  local fixed=0
+  local failed=0
+  for name in "${to_fix[@]}"; do
+    if gcloud run services add-iam-policy-binding "$name" \
+         --region="$REGION" \
+         --member=allUsers \
+         --role=roles/run.invoker \
+         --quiet &>/dev/null; then
+      ok "Fixed IAM: ${name}"
+      (( fixed++ ))
+    else
+      err "Failed to fix IAM: ${name}"
+      (( failed++ ))
+    fi
+    sleep 1
+  done
+  info "IAM fix summary: ${fixed} fixed, ${failed} failed"
+}
+
+# ── Step 6: Create / update checker Cloud Run Job ─────────────────────────────
 ensure_checker_job() {
   info "Ensuring checker Cloud Run Job"
 
@@ -284,7 +364,7 @@ ensure_checker_job() {
   fi
 }
 
-# ── Step 6: Execute checker job ───────────────────────────────────────────────
+# ── Step 7: Execute checker job ───────────────────────────────────────────────
 run_checker() {
   info "Executing checker job..."
   gcloud run jobs execute checker \
@@ -302,6 +382,7 @@ fi
 
 if [[ "$SKIP_DEPLOY" != "true" ]]; then
   deploy_services
+  fix_iam_bindings
 fi
 
 if [[ "$SKIP_CHECK" != "true" ]]; then
