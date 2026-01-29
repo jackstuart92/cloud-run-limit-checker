@@ -147,27 +147,33 @@ shared `common.sh` file provides defaults, flag parsing, and helper functions.
 **`deploy.sh` flags:**
 | Flag              | Description                                      | Default                |
 |-------------------|--------------------------------------------------|------------------------|
-| `--target-url`    | Internal IP + port of the target service         | (required)             |
 | `--project`       | GCP project                                      | `cr-limit-tests`       |
 | `--region`        | GCP region                                       | `europe-west1`         |
+| `--zone`          | VM zone                                          | `europe-west1-b`       |
 | `--network`       | VPC network name                                 | `limit-checker-vpc`    |
 | `--subnet`        | Subnet name                                      | `limit-checker-subnet` |
 | `--count`         | Number of services to deploy                     | `10`                   |
 | `--prefix`        | Service name prefix                              | `service`              |
 | `--concurrency`   | Checker job concurrency env var                  | `10`                   |
 | `--batch-size`    | Deploy batch size                                | `50`                   |
+| `--vm-name`       | Target VM name                                   | `target-service`       |
+| `--target-url`    | Override target URL (skips VM setup entirely)    | (derived from VM IP)   |
 | `--skip-build`    | Skip image builds                                | `false`                |
 | `--skip-deploy`   | Skip service deployment                          | `false`                |
 | `--skip-check`    | Skip checker job execution                       | `false`                |
+| `--skip-vm`       | Skip VM create/deploy, just query existing VM IP | `false`                |
 
 **`wipe.sh` flags:**
 | Flag              | Description                                      | Default                |
 |-------------------|--------------------------------------------------|------------------------|
 | `--project`       | GCP project                                      | `cr-limit-tests`       |
 | `--region`        | GCP region                                       | `europe-west1`         |
+| `--zone`          | VM zone                                          | `europe-west1-b`       |
 | `--prefix`        | Service name prefix                              | `service`              |
+| `--vm-name`       | Target VM name                                   | `target-service`       |
 | `--batch-size`    | Delete batch size                                | `50`                   |
 | `--delete-repo`   | Also delete the Artifact Registry repo           | `false`                |
+| `--delete-vm`     | Also delete the target VM                        | `false`                |
 | `--yes`, `-y`     | Skip confirmation prompt                         | `false`                |
 
 **Concurrency:**

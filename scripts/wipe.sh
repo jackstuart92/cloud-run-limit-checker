@@ -12,15 +12,18 @@ usage() {
 Usage: $0 [OPTIONS]
 
 Delete all Cloud Run services matching the prefix, the checker job,
-and optionally the Artifact Registry repo.
+and optionally the Artifact Registry repo and target VM.
 
 Options:
   --project NAME      GCP project              (default: cr-limit-tests)
   --region REGION     GCP region               (default: europe-west1)
+  --zone ZONE         VM zone                  (default: europe-west1-b)
   --prefix NAME       Service name prefix      (default: service)
   --repo-name NAME    Artifact Registry repo   (default: limit-checker)
+  --vm-name NAME      Target VM name           (default: target-service)
   --batch-size N      Delete batch size         (default: 50)
   --delete-repo       Also delete the Artifact Registry repo
+  --delete-vm         Also delete the target VM
   --yes, -y           Skip confirmation prompt
   -h, --help          Show this help
 EOF
@@ -51,7 +54,7 @@ fi
 
 info "Found ${#SERVICES[@]} service(s) and checker job exists: ${CHECKER_EXISTS}"
 
-if (( ${#SERVICES[@]} == 0 )) && [[ "$CHECKER_EXISTS" != "true" ]] && [[ "$DELETE_REPO" != "true" ]]; then
+if (( ${#SERVICES[@]} == 0 )) && [[ "$CHECKER_EXISTS" != "true" ]] && [[ "$DELETE_REPO" != "true" ]] && [[ "$DELETE_VM" != "true" ]]; then
   ok "Nothing to delete"
   exit 0
 fi
@@ -68,6 +71,9 @@ if [[ "$YES" != "true" ]]; then
   fi
   if [[ "$DELETE_REPO" == "true" ]]; then
     echo "  - Artifact Registry repo: ${REPO_NAME}"
+  fi
+  if [[ "$DELETE_VM" == "true" ]]; then
+    echo "  - Compute Engine VM: ${VM_NAME} (zone: ${ZONE})"
   fi
   echo ""
   read -rp "Continue? [y/N] " confirm
@@ -149,6 +155,18 @@ if [[ "$DELETE_REPO" == "true" ]]; then
     ok "Artifact Registry repo deleted"
   else
     err "Failed to delete Artifact Registry repo"
+  fi
+fi
+
+# ── Optionally delete target VM ───────────────────────────────────────────────
+if [[ "$DELETE_VM" == "true" ]]; then
+  info "Deleting target VM: ${VM_NAME} (zone: ${ZONE})"
+  if gcloud compute instances delete "$VM_NAME" \
+       --zone="$ZONE" \
+       --quiet; then
+    ok "Target VM deleted"
+  else
+    err "Failed to delete target VM"
   fi
 fi
 

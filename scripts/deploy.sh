@@ -10,16 +10,14 @@ source "$SCRIPT_DIR/common.sh"
 
 usage() {
   cat <<EOF
-Usage: $0 --target-url <URL> [OPTIONS]
+Usage: $0 [OPTIONS]
 
-Deploy Cloud Run services and run the checker job.
-
-Required:
-  --target-url URL    Internal VM IP + path (e.g. http://10.0.0.2:8080/log)
+Deploy the target VM, Cloud Run services, and run the checker job.
 
 Options:
   --project NAME      GCP project              (default: cr-limit-tests)
   --region REGION     GCP region               (default: europe-west1)
+  --zone ZONE         VM zone                  (default: europe-west1-b)
   --network NAME      VPC network              (default: limit-checker-vpc)
   --subnet NAME       Subnet                   (default: limit-checker-subnet)
   --prefix NAME       Service name prefix      (default: service)
@@ -27,24 +25,85 @@ Options:
   --concurrency N     Checker concurrency      (default: 10)
   --batch-size N      Deploy batch size         (default: 50)
   --repo-name NAME    Artifact Registry repo   (default: limit-checker)
+  --vm-name NAME      Target VM name           (default: target-service)
+  --target-url URL    Override target URL (skips VM setup entirely)
   --skip-build        Skip image builds
   --skip-deploy       Skip service deployment
   --skip-check        Skip checker job execution
+  --skip-vm           Skip VM create/deploy, just query existing VM IP
   -h, --help          Show this help
 EOF
 }
 
 parse_flags "$@"
-
-if [[ -z "$TARGET_URL" ]]; then
-  err "--target-url is required"
-  usage
-  exit 1
-fi
-
 ensure_project
 
-# ── Step 1: Create Artifact Registry repo (idempotent) ────────────────────────
+# ── Step 1: Ensure target VM ─────────────────────────────────────────────────
+query_vm_ip() {
+  gcloud compute instances describe "$VM_NAME" \
+    --zone="$ZONE" \
+    --format='value(networkInterfaces[0].networkIP)'
+}
+
+ensure_target_vm() {
+  if [[ -n "$TARGET_URL" ]]; then
+    info "Using provided --target-url: ${TARGET_URL}"
+    return
+  fi
+
+  if [[ "$SKIP_VM" == "true" ]]; then
+    info "Querying existing VM IP (--skip-vm)"
+    local ip
+    ip=$(query_vm_ip)
+    TARGET_URL="http://${ip}:8080/log"
+    ok "Derived TARGET_URL=${TARGET_URL}"
+    return
+  fi
+
+  info "Cross-compiling target binary"
+  GOOS=linux GOARCH=amd64 go build -o "$ROOT_DIR/target/target-bin" "$ROOT_DIR/target/main.go"
+  ok "Built target/target-bin"
+
+  info "Ensuring VM: ${VM_NAME} (zone: ${ZONE})"
+  if gcloud compute instances describe "$VM_NAME" \
+       --zone="$ZONE" --format='value(name)' &>/dev/null; then
+    ok "VM already exists"
+  else
+    gcloud compute instances create "$VM_NAME" \
+      --zone="$ZONE" \
+      --machine-type=e2-micro \
+      --network="$NETWORK" \
+      --subnet="$SUBNET" \
+      --no-address \
+      --tags=target-service \
+      --quiet
+    ok "Created VM: ${VM_NAME}"
+  fi
+
+  info "Copying target binary to VM via IAP"
+  gcloud compute scp "$ROOT_DIR/target/target-bin" "${VM_NAME}:~/target" \
+    --zone="$ZONE" \
+    --tunnel-through-iap \
+    --quiet
+  ok "Binary copied"
+
+  info "Starting target service on VM"
+  gcloud compute ssh "$VM_NAME" \
+    --zone="$ZONE" \
+    --tunnel-through-iap \
+    --quiet \
+    --command='pkill -f ./target || true; nohup ./target > target.log 2>&1 & sleep 1 && echo "target started"'
+  ok "Target service started"
+
+  local ip
+  ip=$(query_vm_ip)
+  TARGET_URL="http://${ip}:8080/log"
+  ok "Derived TARGET_URL=${TARGET_URL}"
+}
+
+ensure_target_vm
+
+# ── Step 2: Create Artifact Registry repo (idempotent) ────────────────────────
 create_repo() {
   info "Ensuring Artifact Registry repo: ${REPO_NAME}"
   if gcloud artifacts repositories describe "$REPO_NAME" \
@@ -59,7 +118,7 @@ create_repo() {
   fi
 }
 
-# ── Step 2: Build images with Cloud Build ─────────────────────────────────────
+# ── Step 3: Build images with Cloud Build ─────────────────────────────────────
 build_images() {
   info "Building service image: ${SERVICE_IMAGE}"
   gcloud builds submit "$ROOT_DIR/service" \
@@ -74,7 +133,7 @@ build_images() {
   ok "Images built"
 }
 
-# ── Step 3: Deploy N services in batches ──────────────────────────────────────
+# ── Step 4: Deploy N services in batches ──────────────────────────────────────
 deploy_services() {
   info "Deploying ${COUNT} services (batch size: ${BATCH_SIZE})"
 
@@ -146,7 +205,7 @@ deploy_services() {
   fi
 }
 
-# ── Step 4: Create / update checker Cloud Run Job ─────────────────────────────
+# ── Step 5: Create / update checker Cloud Run Job ─────────────────────────────
 ensure_checker_job() {
   info "Ensuring checker Cloud Run Job"
 
@@ -183,7 +242,7 @@ ensure_checker_job() {
   fi
 }
 
-# ── Step 5: Execute checker job ───────────────────────────────────────────────
+# ── Step 6: Execute checker job ───────────────────────────────────────────────
 run_checker() {
   info "Executing checker job..."
   gcloud run jobs execute checker \

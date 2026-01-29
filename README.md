@@ -150,14 +150,17 @@ cloud-run-limit-checker/
 ## Quick Start
 
 ```bash
-# Deploy 10 services and run the checker
+# Deploy target VM, 10 Cloud Run services, and run the checker
+./scripts/deploy.sh
+
+# Deploy more services, skip VM setup and image rebuilding
+./scripts/deploy.sh --count 50 --skip-vm --skip-build
+
+# Use a specific target URL instead of creating a VM
 ./scripts/deploy.sh --target-url http://10.0.0.x:8080/log
 
-# Deploy more services, skip rebuilding images
-./scripts/deploy.sh --target-url http://10.0.0.x:8080/log --count 50 --skip-build
-
-# Delete everything
-./scripts/wipe.sh --yes
+# Delete everything including the target VM
+./scripts/wipe.sh --delete-vm --yes
 ```
 
 See [docs/technical-design.md](docs/technical-design.md) for detailed setup

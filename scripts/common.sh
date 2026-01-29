@@ -7,6 +7,7 @@ set -euo pipefail
 # ── Defaults ──────────────────────────────────────────────────────────────────
 PROJECT="${PROJECT:-cr-limit-tests}"
 REGION="${REGION:-europe-west1}"
+ZONE="${ZONE:-europe-west1-b}"
 NETWORK="${NETWORK:-limit-checker-vpc}"
 SUBNET="${SUBNET:-limit-checker-subnet}"
 PREFIX="${PREFIX:-service}"
@@ -15,14 +16,17 @@ CONCURRENCY="${CONCURRENCY:-10}"
 BATCH_SIZE="${BATCH_SIZE:-50}"
 TARGET_URL="${TARGET_URL:-}"
 REPO_NAME="${REPO_NAME:-limit-checker}"
+VM_NAME="${VM_NAME:-target-service}"
 
 # Skip flags (deploy.sh only)
 SKIP_BUILD="${SKIP_BUILD:-false}"
 SKIP_DEPLOY="${SKIP_DEPLOY:-false}"
 SKIP_CHECK="${SKIP_CHECK:-false}"
+SKIP_VM="${SKIP_VM:-false}"
 
 # Wipe flags
 DELETE_REPO="${DELETE_REPO:-false}"
+DELETE_VM="${DELETE_VM:-false}"
 YES="${YES:-false}"
 
 # ── Derived variables (set after flag parsing) ────────────────────────────────
@@ -42,6 +46,7 @@ parse_flags() {
     case "$1" in
       --project)    PROJECT="$2";     shift 2 ;;
       --region)     REGION="$2";      shift 2 ;;
+      --zone)       ZONE="$2";        shift 2 ;;
       --network)    NETWORK="$2";     shift 2 ;;
       --subnet)     SUBNET="$2";      shift 2 ;;
       --prefix)     PREFIX="$2";      shift 2 ;;
@@ -50,10 +55,13 @@ parse_flags() {
       --batch-size) BATCH_SIZE="$2";  shift 2 ;;
       --target-url) TARGET_URL="$2";  shift 2 ;;
       --repo-name)  REPO_NAME="$2";   shift 2 ;;
+      --vm-name)    VM_NAME="$2";     shift 2 ;;
       --skip-build) SKIP_BUILD=true;  shift ;;
       --skip-deploy) SKIP_DEPLOY=true; shift ;;
       --skip-check) SKIP_CHECK=true;  shift ;;
+      --skip-vm)    SKIP_VM=true;     shift ;;
       --delete-repo) DELETE_REPO=true; shift ;;
+      --delete-vm)  DELETE_VM=true;   shift ;;
       --yes|-y)     YES=true;         shift ;;
       -h|--help)    usage; exit 0 ;;
       *)            err "Unknown flag: $1"; usage; exit 1 ;;
