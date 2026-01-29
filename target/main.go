@@ -46,6 +46,8 @@ func logHandler(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(entry)
 	fmt.Println(string(data))
 
+	time.Sleep(10 * time.Second)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{

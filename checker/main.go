@@ -201,7 +201,7 @@ func pingAll(services []serviceInfo, concurrency int) []result {
 
 func pingService(svc serviceInfo) result {
 	url := svc.URI + "/ping"
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second}
 
 	resp, err := client.Get(url)
 	if err != nil {
