@@ -17,6 +17,9 @@ BATCH_SIZE="${BATCH_SIZE:-50}"
 TARGET_URL="${TARGET_URL:-}"
 REPO_NAME="${REPO_NAME:-limit-checker}"
 VM_NAME="${VM_NAME:-target-service}"
+SUBNET_RANGE="${SUBNET_RANGE:-10.0.0.0/20}"
+FW_RULE_TARGET="${FW_RULE_TARGET:-allow-cloudrun-to-target}"
+FW_RULE_IAP="${FW_RULE_IAP:-allow-iap-ssh}"
 
 # Skip flags (deploy.sh only)
 SKIP_BUILD="${SKIP_BUILD:-false}"
@@ -56,6 +59,9 @@ parse_flags() {
       --target-url) TARGET_URL="$2";  shift 2 ;;
       --repo-name)  REPO_NAME="$2";   shift 2 ;;
       --vm-name)    VM_NAME="$2";     shift 2 ;;
+      --subnet-range) SUBNET_RANGE="$2"; shift 2 ;;
+      --fw-target)  FW_RULE_TARGET="$2"; shift 2 ;;
+      --fw-iap)     FW_RULE_IAP="$2";   shift 2 ;;
       --skip-build) SKIP_BUILD=true;  shift ;;
       --skip-deploy) SKIP_DEPLOY=true; shift ;;
       --skip-check) SKIP_CHECK=true;  shift ;;

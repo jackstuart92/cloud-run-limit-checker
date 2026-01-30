@@ -38,12 +38,14 @@ The project consists of four components:
    Because it runs inside the VPC, it can reach the internal-only Cloud Run
    services directly.
 
-4. **Deploy/wipe scripts** (Bash, runs locally) -- Two shell scripts that use
-   `gcloud` commands to manage the full lifecycle. `deploy.sh` builds container
-   images with Cloud Build, deploys N Cloud Run services in batches, creates the
-   checker job, and executes it. `wipe.sh` discovers all deployed services by
-   prefix, deletes them in batches, removes the checker job, and optionally
-   cleans up the Artifact Registry repo.
+4. **Scripts** (Bash, runs locally) -- Four shell scripts that use `gcloud`
+   commands to manage the full lifecycle. `setup.sh` creates the VPC, subnet,
+   and firewall rules (idempotent). `deploy.sh` builds container images with
+   Cloud Build, deploys N Cloud Run services in batches, creates the checker
+   job, and executes it. `wipe.sh` discovers all deployed services by prefix,
+   deletes them in batches, removes the checker job, and optionally cleans up
+   the Artifact Registry repo. `teardown.sh` deletes the firewall rules,
+   subnet, and VPC network created by `setup.sh`.
 
 ## Network Architecture
 
@@ -92,22 +94,24 @@ The project consists of four components:
 
 Local machine
 +------------------------------------------+
-| deploy.sh / wipe.sh                     |
-| (Bash scripts using gcloud CLI)         |
+| setup.sh / deploy.sh / wipe.sh /       |
+| teardown.sh (Bash, gcloud CLI)          |
 |                                          |
+| - Creates VPC, subnet, firewall rules  |
 | - Builds images (Cloud Build)           |
 | - Deploys N services (gcloud run)       |
 | - Creates & executes checker job        |
 | - Deletes services & job on wipe        |
+| - Tears down VPC infrastructure         |
 +------------------------------------------+
 ```
 
 ## How It Works
 
-1. **Prerequisites** -- The GCP project `cr-limit-tests` is manually created
-   with the required APIs enabled (Cloud Run, Compute Engine, VPC). A VPC,
-   subnet, and Compute Engine
-   VM running the target service are set up before running the orchestrator.
+1. **Prerequisites** -- The GCP project `cr-limit-tests` is manually created.
+   `setup.sh` enables the required APIs and creates the VPC, subnet, and
+   firewall rules. The Compute Engine VM running the target service is created
+   automatically by `deploy.sh`.
 
 2. **Deploy** -- `deploy.sh` builds container images via Cloud Build, then
    deploys N Cloud Run services in batches using `gcloud run deploy`. All
@@ -141,26 +145,31 @@ cloud-run-limit-checker/
     Dockerfile
   target/                    # Internal Compute Engine target service (Go)
     main.go
-  scripts/                   # Deploy and wipe bash scripts
+  scripts/                   # Lifecycle management scripts
     common.sh                # Shared defaults, flag parsing, helpers
+    setup.sh                 # Create VPC, subnet, firewall rules
     deploy.sh                # Build, deploy services, run checker
     wipe.sh                  # Delete services, job, and optionally repo
+    teardown.sh              # Delete firewall rules, subnet, VPC
 ```
 
 ## Quick Start
 
 ```bash
+# One-time setup: create VPC, subnet, firewall rules
+./scripts/setup.sh
+
 # Deploy target VM, 10 Cloud Run services, and run the checker
 ./scripts/deploy.sh
 
-# Deploy more services, skip VM setup and image rebuilding
-./scripts/deploy.sh --count 50 --skip-vm --skip-build
+# Deploy 1000 services with full concurrency
+./scripts/deploy.sh --count 1000 --concurrency 1000 --skip-vm --skip-build
 
-# Use a specific target URL instead of creating a VM
-./scripts/deploy.sh --target-url http://10.0.0.x:8080/log
-
-# Delete everything including the target VM
+# Clean up services and VM
 ./scripts/wipe.sh --delete-vm --yes
+
+# Tear down all infrastructure (when completely done)
+./scripts/teardown.sh --yes
 ```
 
 See [docs/technical-design.md](docs/technical-design.md) for detailed setup

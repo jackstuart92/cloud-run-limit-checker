@@ -122,10 +122,23 @@ service has working connectivity to the target VM.
 - Task timeout set high enough to check all services (e.g. 30 minutes).
 - 1 task, 0 retries (the orchestrator handles re-runs if needed).
 
-### 4. Deploy and Wipe Scripts (`scripts/`)
+### 4. Lifecycle Scripts (`scripts/`)
 
-Two bash scripts that use `gcloud` commands to manage the full lifecycle. A
+Four bash scripts that use `gcloud` commands to manage the full lifecycle. A
 shared `common.sh` file provides defaults, flag parsing, and helper functions.
+
+**`setup.sh`** -- creates infrastructure prerequisites (idempotent):
+1. Enables required GCP APIs (Cloud Run, Compute Engine, Artifact Registry,
+   Cloud Build, Logging, IAP).
+2. Creates VPC network with custom subnet mode.
+3. Creates subnet with Private Google Access enabled.
+4. Creates firewall rule allowing Cloud Run services to reach the target VM
+   on port 8080.
+5. Creates firewall rule allowing IAP SSH tunnelling (TCP from
+   `35.235.240.0/20`).
+
+All operations use a check-before-create pattern so the script can be re-run
+safely.
 
 **`deploy.sh`** -- builds, deploys, and verifies:
 1. Creates an Artifact Registry repo (idempotent).
@@ -176,6 +189,36 @@ shared `common.sh` file provides defaults, flag parsing, and helper functions.
 | `--delete-vm`     | Also delete the target VM                        | `false`                |
 | `--yes`, `-y`     | Skip confirmation prompt                         | `false`                |
 
+**`setup.sh`** creates all infrastructure prerequisites. It is idempotent and
+can be re-run safely.
+
+**`setup.sh` flags:**
+| Flag              | Description                                      | Default                |
+|-------------------|--------------------------------------------------|------------------------|
+| `--project`       | GCP project                                      | `cr-limit-tests`       |
+| `--region`        | GCP region                                       | `europe-west1`         |
+| `--network`       | VPC network name                                 | `limit-checker-vpc`    |
+| `--subnet`        | Subnet name                                      | `limit-checker-subnet` |
+| `--subnet-range`  | Subnet CIDR range                                | `10.0.0.0/20`          |
+| `--fw-target`     | Firewall rule name: Cloud Run to target          | `allow-cloudrun-to-target` |
+| `--fw-iap`        | Firewall rule name: IAP SSH                      | `allow-iap-ssh`        |
+
+**`teardown.sh`** reverses `setup.sh` -- deletes firewall rules, subnet, and
+VPC network. Does NOT disable APIs (harmless to leave enabled, and disabling
+can break other resources in the project). Requires confirmation unless `--yes`
+is passed.
+
+**`teardown.sh` flags:**
+| Flag              | Description                                      | Default                |
+|-------------------|--------------------------------------------------|------------------------|
+| `--project`       | GCP project                                      | `cr-limit-tests`       |
+| `--region`        | GCP region                                       | `europe-west1`         |
+| `--network`       | VPC network name                                 | `limit-checker-vpc`    |
+| `--subnet`        | Subnet name                                      | `limit-checker-subnet` |
+| `--fw-target`     | Firewall rule name: Cloud Run to target          | `allow-cloudrun-to-target` |
+| `--fw-iap`        | Firewall rule name: IAP SSH                      | `allow-iap-ssh`        |
+| `--yes`, `-y`     | Skip confirmation prompt                         | `false`                |
+
 **Concurrency:**
 Service deployments and deletions run as background shell jobs within each
 batch, with a 1-second stagger to avoid API rate limit spikes. Verification
@@ -184,8 +227,9 @@ environment variable.
 
 ## Manual Infrastructure Setup
 
-The following resources must exist before the orchestrator is run. These are
-created manually or via `gcloud` commands.
+The following resources must exist before the orchestrator is run. Steps 2--4
+are automated by `setup.sh` (and reversed by `teardown.sh`). The `gcloud`
+commands are shown below for reference.
 
 ### 1. GCP Project
 
